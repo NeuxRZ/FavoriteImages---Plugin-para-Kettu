@@ -1,0 +1,16 @@
+{
+  "name": "FavoriteMedia",
+  "description": "Guarda GIFs e imágenes (JPG, PNG, WEBP) como favoritos. Mantén presionado en cualquier imagen o GIF para agregarla a tus favoritos.",
+  "authors": [
+    {
+      "name": "Ciel",
+      "id": "1290060248610111603"
+    }
+  ],
+  "main": "index.js",
+  "vendetta": {
+    "icon": "ic_star"
+  },
+  "version": "1.0.0",
+  "license": "MIT"
+}
