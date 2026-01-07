@@ -1,257 +1,313 @@
-// FavoriteMedia Plugin para Kettu
-// Permite guardar GIFs e imágenes (JPG, PNG) como favoritos
+/**
+ * FavoriteImages - Plugin para Kettu
+ * Permite guardar imágenes (JPG/PNG/GIF) en favoritos
+ * Versión: 1.0.0
+ */
 
-const { storage } = vendetta;
-const { getByProps, getByStoreName } = vendetta.metro;
-const { showToast } = vendetta.ui.toasts;
-const { getAssetIDByName } = vendetta.ui.assets;
-const { React } = vendetta.metro.common;
-const { after } = vendetta.patcher;
+import { storage } from "@vendetta/plugin";
+import { findByProps } from "@vendetta/metro";
+import { after } from "@vendetta/patcher";
+import { showToast } from "@vendetta/ui/toasts";
+import { getAssetIDByName } from "@vendetta/ui/assets";
 
-// Configuración
-const FAVORITES_KEY = "favoriteMedia";
-const MAX_FAVORITES = 100;
+// Inicializar almacenamiento
+storage.images = storage.images || [];
 
-// Obtener favoritos guardados
-function getFavorites() {
-  try {
-    const saved = storage.get(FAVORITES_KEY);
-    return saved ? JSON.parse(saved) : [];
-  } catch (e) {
-    console.error("Error loading favorites:", e);
-    return [];
-  }
+const patches = [];
+
+// Verificar si es imagen válida
+function isValidImage(attachment) {
+  if (!attachment?.content_type) return false;
+  const type = attachment.content_type.toLowerCase();
+  return type.includes("image/jpeg") || 
+         type.includes("image/jpg") || 
+         type.includes("image/png") || 
+         type.includes("image/gif");
 }
 
-// Guardar favoritos
-function saveFavorites(favorites) {
-  try {
-    storage.set(FAVORITES_KEY, JSON.stringify(favorites));
-    return true;
-  } catch (e) {
-    console.error("Error saving favorites:", e);
-    return false;
-  }
-}
-
-// Agregar a favoritos
-function addFavorite(url, type = "gif") {
-  const favorites = getFavorites();
+// Agregar imagen a favoritos
+function addImage(url, filename) {
+  const exists = storage.images.some(img => img.url === url);
   
-  // Verificar si ya existe
-  if (favorites.some(f => f.url === url)) {
-    showToast("Ya está en favoritos", getAssetIDByName("ic_information"));
-    return false;
+  if (exists) {
+    showToast("⚠️ Esta imagen ya está guardada", getAssetIDByName("ic_warning_24px"));
+    return;
   }
   
-  // Verificar límite
-  if (favorites.length >= MAX_FAVORITES) {
-    showToast(`Límite de ${MAX_FAVORITES} favoritos alcanzado`, getAssetIDByName("ic_warning"));
-    return false;
-  }
-  
-  // Agregar nuevo favorito
-  favorites.unshift({
-    url,
-    type,
+  storage.images.push({
+    url: url,
+    filename: filename || "imagen",
+    id: "img_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9),
     timestamp: Date.now()
   });
   
-  if (saveFavorites(favorites)) {
-    showToast("Agregado a favoritos ✓", getAssetIDByName("ic_check"));
-    return true;
-  }
-  
-  showToast("Error al guardar", getAssetIDByName("ic_close"));
-  return false;
+  showToast("⭐ Imagen guardada", getAssetIDByName("ic_star_24px"));
 }
 
-// Remover de favoritos
-function removeFavorite(url) {
-  let favorites = getFavorites();
-  favorites = favorites.filter(f => f.url !== url);
+// Remover imagen de favoritos
+function removeImage(url) {
+  const before = storage.images.length;
+  storage.images = storage.images.filter(img => img.url !== url);
   
-  if (saveFavorites(favorites)) {
-    showToast("Eliminado de favoritos", getAssetIDByName("ic_check"));
-    return true;
+  if (storage.images.length < before) {
+    showToast("🗑️ Imagen eliminada", getAssetIDByName("ic_trash_24px"));
   }
-  
-  return false;
 }
 
-// Detectar tipo de archivo por URL
-function getMediaType(url) {
-  const lower = url.toLowerCase();
-  if (lower.includes('.gif') || lower.includes('tenor.com') || lower.includes('giphy.com')) {
-    return 'gif';
-  }
-  if (lower.match(/\.(jpg|jpeg|png|webp)/)) {
-    return 'image';
-  }
-  return 'unknown';
+// Verificar si está en favoritos
+function isFavorited(url) {
+  return storage.images.some(img => img.url === url);
 }
-
-// Patches
-let patches = [];
 
 export default {
   onLoad: () => {
     try {
-      // Patch para agregar opción en el menú contextual de imágenes
-      const MessageLongPressActionSheet = getByProps("MessageLongPressActionSheet");
+      console.log("[FavoriteImages] Cargando plugin...");
+
+      // Buscar módulo del menú contextual
+      const LazyActionSheet = findByProps("openLazy", "hideActionSheet");
       
-      if (MessageLongPressActionSheet) {
-        const unpatch = after("default", MessageLongPressActionSheet, ([props], res) => {
-          // Buscar si hay imagen o GIF en el mensaje
-          const message = props?.message;
-          if (!message) return res;
-          
-          const attachments = message.attachments || [];
-          const embeds = message.embeds || [];
-          
-          let mediaUrl = null;
-          let mediaType = null;
-          
-          // Buscar en attachments
-          for (const att of attachments) {
-            if (att.content_type?.startsWith('image/')) {
-              mediaUrl = att.url || att.proxy_url;
-              mediaType = getMediaType(mediaUrl);
-              break;
-            }
-          }
-          
-          // Buscar en embeds si no hay attachment
-          if (!mediaUrl) {
-            for (const embed of embeds) {
-              if (embed.type === 'gifv' || embed.type === 'image') {
-                mediaUrl = embed.url || embed.thumbnail?.url || embed.image?.url;
-                mediaType = embed.type === 'gifv' ? 'gif' : 'image';
-                break;
-              }
-            }
-          }
-          
-          // Si encontramos media, agregar opción al menú
-          if (mediaUrl && res?.props?.children) {
-            const buttons = Array.isArray(res.props.children) 
-              ? res.props.children 
-              : [res.props.children];
-            
-            buttons.push(
-              React.createElement("Pressable", {
-                onPress: () => addFavorite(mediaUrl, mediaType),
-                style: { padding: 12 }
-              }, 
-                React.createElement("Text", { 
-                  style: { fontSize: 16, color: "#ffffff" }
-                }, "⭐ Guardar en Favoritos")
-              )
-            );
-            
-            res.props.children = buttons;
-          }
-          
-          return res;
-        });
-        
-        patches.push(unpatch);
+      if (!LazyActionSheet) {
+        console.error("[FavoriteImages] No se encontró LazyActionSheet");
+        showToast("❌ Error al cargar el menú");
+        return;
       }
-      
-      // Patch para agregar botón en el picker de GIFs
-      const GifPicker = getByProps("GifPicker") || getByStoreName("GifPickerStore");
-      
-      if (GifPicker) {
-        // Aquí podrías agregar un tab de favoritos en el picker
-        // Esto requeriría más trabajo de UI pero es posible
-      }
-      
-      showToast("FavoriteMedia cargado ✓", getAssetIDByName("ic_check"));
-      
-    } catch (e) {
-      console.error("Error loading FavoriteMedia:", e);
-      showToast("Error cargando FavoriteMedia", getAssetIDByName("ic_close"));
-    }
-  },
-  
-  onUnload: () => {
-    // Deshacer todos los patches
-    for (const unpatch of patches) {
-      unpatch();
-    }
-    patches = [];
-  },
-  
-  settings: {
-    // Panel de configuración para ver y gestionar favoritos
-    FavoritesList: () => {
-      const [favorites, setFavorites] = React.useState(getFavorites());
-      const { ScrollView, View, Text, Image, Pressable } = vendetta.metro.common;
-      
-      const refresh = () => setFavorites(getFavorites());
-      
-      const handleRemove = (url) => {
-        removeFavorite(url);
-        refresh();
-      };
-      
-      const handleCopy = (url) => {
-        // Copiar al portapapeles (si hay API disponible)
-        showToast("URL copiada", getAssetIDByName("ic_check"));
-      };
-      
-      return React.createElement(ScrollView, { style: { padding: 16 } },
-        React.createElement(Text, { 
-          style: { fontSize: 20, fontWeight: "bold", marginBottom: 12, color: "#ffffff" }
-        }, `Favoritos (${favorites.length}/${MAX_FAVORITES})`),
-        
-        favorites.length === 0 
-          ? React.createElement(Text, { 
-              style: { color: "#b9bbbe", textAlign: "center", marginTop: 20 }
-            }, "No hay favoritos guardados.\nMantén presionado en una imagen o GIF para agregarla.")
-          : favorites.map((fav, idx) => 
-              React.createElement(View, {
-                key: idx,
-                style: { 
-                  marginBottom: 16, 
-                  backgroundColor: "#2f3136", 
-                  borderRadius: 8, 
-                  padding: 12 
+
+      // Patch para agregar botón al menú
+      const unpatch = after("openLazy", LazyActionSheet, (args, result) => {
+        const [component, key, messageData] = args;
+
+        // Solo para el menú de mensajes largos
+        if (key !== "MessageLongPressActionSheet") return result;
+        if (!messageData?.message) return result;
+
+        const message = messageData.message;
+        if (!message.attachments?.length) return result;
+
+        // Buscar imagen en attachments
+        const imageAttachment = message.attachments.find(isValidImage);
+        if (!imageAttachment) return result;
+
+        const isInFavorites = isFavorited(imageAttachment.url);
+
+        // Modificar el menú
+        if (result && typeof result.then === 'function') {
+          return result.then((sheet) => {
+            if (!sheet?.default) return sheet;
+
+            const OriginalComponent = sheet.default;
+            
+            sheet.default = (props) => {
+              const originalResult = OriginalComponent(props);
+              
+              try {
+                if (originalResult?.props?.children) {
+                  const children = originalResult.props.children;
+                  
+                  // Crear botón
+                  const button = {
+                    icon: isInFavorites ? "ic_trash_24px" : "ic_star_24px",
+                    label: isInFavorites ? "Quitar de Favoritos" : "Guardar en Favoritos",
+                    onPress: () => {
+                      try {
+                        if (isInFavorites) {
+                          removeImage(imageAttachment.url);
+                        } else {
+                          addImage(imageAttachment.url, imageAttachment.filename);
+                        }
+                        LazyActionSheet.hideActionSheet();
+                      } catch (error) {
+                        console.error("[FavoriteImages] Error:", error);
+                        showToast("❌ Error al procesar imagen");
+                      }
+                    }
+                  };
+
+                  // Agregar botón al menú
+                  if (Array.isArray(children)) {
+                    children.push(button);
+                  } else if (children) {
+                    originalResult.props.children = [children, button];
+                  }
                 }
-              },
-                React.createElement(Image, {
-                  source: { uri: fav.url },
-                  style: { width: "100%", height: 200, borderRadius: 4, marginBottom: 8 },
-                  resizeMode: "contain"
-                }),
-                React.createElement(Text, {
-                  style: { color: "#72767d", fontSize: 12, marginBottom: 8 }
-                }, `Tipo: ${fav.type} • ${new Date(fav.timestamp).toLocaleDateString()}`),
-                React.createElement(View, { style: { flexDirection: "row", gap: 8 } },
-                  React.createElement(Pressable, {
-                    onPress: () => handleCopy(fav.url),
-                    style: { 
-                      backgroundColor: "#5865f2", 
-                      padding: 8, 
-                      borderRadius: 4, 
-                      flex: 1, 
-                      alignItems: "center" 
-                    }
-                  }, React.createElement(Text, { style: { color: "#ffffff" } }, "Copiar URL")),
-                  React.createElement(Pressable, {
-                    onPress: () => handleRemove(fav.url),
-                    style: { 
-                      backgroundColor: "#ed4245", 
-                      padding: 8, 
-                      borderRadius: 4, 
-                      flex: 1, 
-                      alignItems: "center" 
-                    }
-                  }, React.createElement(Text, { style: { color: "#ffffff" } }, "Eliminar"))
+              } catch (error) {
+                console.error("[FavoriteImages] Error al modificar menú:", error);
+              }
+
+              return originalResult;
+            };
+
+            return sheet;
+          });
+        }
+
+        return result;
+      });
+
+      patches.push(unpatch);
+      
+      console.log("[FavoriteImages] ✅ Plugin cargado");
+      showToast("✅ FavoriteImages activado", getAssetIDByName("ic_check_24px"));
+
+    } catch (error) {
+      console.error("[FavoriteImages] Error crítico:", error);
+      showToast("❌ Error al cargar FavoriteImages");
+    }
+  },
+
+  onUnload: () => {
+    try {
+      patches.forEach(unpatch => unpatch?.());
+      patches.length = 0;
+      console.log("[FavoriteImages] Plugin descargado");
+      showToast("FavoriteImages desactivado");
+    } catch (error) {
+      console.error("[FavoriteImages] Error al descargar:", error);
+    }
+  },
+
+  settings: {
+    FavoriteImages: {
+      type: "custom",
+      component: () => {
+        const React = window.React;
+        const { 
+          View, 
+          Text, 
+          Image, 
+          ScrollView, 
+          TouchableOpacity, 
+          StyleSheet,
+          RefreshControl 
+        } = window.ReactNative;
+
+        const [refreshing, setRefreshing] = React.useState(false);
+        const [images, setImages] = React.useState([...storage.images]);
+
+        const onRefresh = React.useCallback(() => {
+          setRefreshing(true);
+          setImages([...storage.images]);
+          setTimeout(() => setRefreshing(false), 500);
+        }, []);
+
+        const deleteImage = (imageId) => {
+          try {
+            storage.images = storage.images.filter(img => img.id !== imageId);
+            setImages([...storage.images]);
+            showToast("🗑️ Imagen eliminada");
+          } catch (error) {
+            console.error("[FavoriteImages] Error al eliminar:", error);
+            showToast("❌ Error al eliminar");
+          }
+        };
+
+        const styles = StyleSheet.create({
+          container: {
+            flex: 1,
+            backgroundColor: "#2f3136",
+            padding: 16
+          },
+          header: {
+            marginBottom: 20
+          },
+          title: {
+            color: "#ffffff",
+            fontSize: 24,
+            fontWeight: "bold",
+            marginBottom: 8
+          },
+          counter: {
+            color: "#b9bbbe",
+            fontSize: 14
+          },
+          grid: {
+            flexDirection: "row",
+            flexWrap: "wrap",
+            justifyContent: "flex-start"
+          },
+          imageContainer: {
+            margin: 4,
+            borderRadius: 8,
+            overflow: "hidden",
+            backgroundColor: "#202225"
+          },
+          image: {
+            width: 100,
+            height: 100
+          },
+          emptyContainer: {
+            flex: 1,
+            justifyContent: "center",
+            alignItems: "center",
+            paddingVertical: 60
+          },
+          emptyText: {
+            color: "#72767d",
+            fontSize: 16,
+            textAlign: "center",
+            marginBottom: 12
+          },
+          emptySubtext: {
+            color: "#4f5058",
+            fontSize: 13,
+            textAlign: "center",
+            paddingHorizontal: 40
+          },
+          hint: {
+            color: "#72767d",
+            fontSize: 12,
+            textAlign: "center",
+            marginTop: 20,
+            paddingHorizontal: 20
+          }
+        });
+
+        return React.createElement(ScrollView, {
+          style: styles.container,
+          refreshControl: React.createElement(RefreshControl, {
+            refreshing: refreshing,
+            onRefresh: onRefresh,
+            colors: ["#5865f2"]
+          })
+        },
+          React.createElement(View, { style: styles.header },
+            React.createElement(Text, { style: styles.title }, "🖼️ Imágenes Favoritas"),
+            React.createElement(Text, { style: styles.counter }, 
+              images.length + " imagen" + (images.length !== 1 ? "es" : "") + " guardada" + (images.length !== 1 ? "s" : "")
+            )
+          ),
+
+          images.length > 0
+            ? React.createElement(View, { style: styles.grid },
+                images.map((img) =>
+                  React.createElement(TouchableOpacity, {
+                    key: img.id,
+                    style: styles.imageContainer,
+                    onLongPress: () => deleteImage(img.id),
+                    activeOpacity: 0.7
+                  },
+                    React.createElement(Image, {
+                      source: { uri: img.url },
+                      style: styles.image,
+                      resizeMode: "cover"
+                    })
+                  )
                 )
               )
-            )
-      );
+            : React.createElement(View, { style: styles.emptyContainer },
+                React.createElement(Text, { style: styles.emptyText }, 
+                  "No tienes imágenes guardadas"
+                ),
+                React.createElement(Text, { style: styles.emptySubtext },
+                  "Mantén presionada cualquier imagen en el chat y selecciona 'Guardar en Favoritos'"
+                )
+              ),
+
+          images.length > 0 && React.createElement(Text, { style: styles.hint },
+            "💡 Mantén presionada una imagen para eliminarla"
+          )
+        );
+      }
     }
   }
 };
