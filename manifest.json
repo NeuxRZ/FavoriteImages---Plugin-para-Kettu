@@ -1,16 +1,14 @@
 {
-  "name": "FavoriteImages - Plugin para Kettu",
-  "description": "Guarda GIFs e imágenes (JPG, PNG, WEBP) como favoritos. Mantén presionado en cualquier imagen o GIF para agregarla a tus favoritos.",
+  "name": "FavoriteImages",
+  "description": "Permite guardar imágenes (JPG/PNG) en tus GIFs favoritos de Discord",
   "authors": [
     {
-      "name": "Ciel",
-      "id": "1290060248610111603"
+      "name": "Tu Nombre",
+      "id": "123456789"
     }
   ],
   "main": "index.js",
   "vendetta": {
-    "icon": "ic_star"
-  },
-  "version": "1.0.0",
-  "license": "MIT"
+    "icon": "ImageIcon"
+  }
 }
